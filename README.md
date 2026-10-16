@@ -1,5 +1,8 @@
 # VST3-haiku
 
+> **Users:** install the whole stack from the [JackDAW release](https://github.com/rations/jackDAW-haiku/releases)
+> (`sh install.sh`). This repository is the source of the `vst3_haiku` package.
+
 A native port of the [Steinberg VST 3 SDK](https://github.com/steinbergmedia/vst3sdk)
 (3.8.0, MIT-licensed) to [Haiku OS](https://www.haiku-os.org/), with Haiku added as a
 first-class platform (`SMTG_OS_HAIKU`) rather than a Linux masquerade.
