@@ -25,20 +25,26 @@ standalone `vst3host` here, with no JACK needed anywhere.
   - `public.sdk/source/vst/hosting/module_haiku.cpp`: module loading with native
     application-path lookup and plugin search via `find_paths()` add-on directories
   - CMake: `SMTG_HAIKU` platform detection and `Contents/x86_64-haiku/` bundle layout
-  - `public.sdk/samples/vst-hosting/audiohost/source/media/mediakit/`: a Media Kit media
-    server for the SDK's audiohost sample, beside its JACK one. On Haiku the audiohost
-    sample runs on it.
+  - `public.sdk/samples/vst-hosting/audiohost/source/media/jdbackend/`: a media server for
+    the SDK's audiohost sample, beside its JACK one, on JackDAW's audio backends (the
+    Media Kit, or JACK through an add-on). On Haiku the audiohost sample runs on it.
 - `hosts/vst3host/` — a headless VST3 host with an interactive parameter REPL (list
   parameters, set values live) and the plug-in's native editor window, built twice:
-  - `vst3host` on the native Media Kit. The plug-in becomes one media node named after it;
-    its first two outputs go to the system mixer, inputs are connected with
-    `--in <source>` / the `connect` command or patched in Cortex, and MIDI inputs are Midi
-    Kit endpoints (`--midi-in`, `midiconnect`, or PatchBay). The buffer size follows the
-    system mixer and can change while it runs.
-  - `vst3jackhost` on JACK, built only when JACK is installed.
-- `haiku/jdbackend/` — the Media Kit node behind `vst3host` and the audiohost sample: JackDAW's Media Kit backend, copied
-  unchanged from [JackDAW](https://github.com/rations/jackdaw-renku) by
-  `tools/sync-jdbackend.sh` (see `haiku/jdbackend/PROVENANCE`). Fix it there, then sync.
+  - `vst3host` on the native Media Kit, or on JACK with `--backend jack` (the `jack.so`
+    add-on, so `vst3host` itself never needs libjack). On the Media Kit the plug-in becomes
+    one media node named after it and its first two outputs go to the system mixer; on JACK
+    they go to the first two playback ports. Inputs are connected with `--in <source>` or the
+    `connect` command (on the Media Kit, a source patched to the node in Cortex shows up in
+    `inputs` and still has to be connected). MIDI inputs are Midi Kit endpoints
+    (`--midi-in`, `midiconnect`, or PatchBay) or JACK MIDI ports. The buffer size can
+    change while it runs.
+  - `vst3jackhost` on the SDK's own JACK client, built only when JACK is installed.
+- `haiku/jdbackend/` — the audio backends behind `vst3host`, the audiohost sample and
+  NAMku's standalone app: JackDAW's Media Kit backend, JACK backend and the loader that finds
+  the JACK add-on, copied unchanged from [JackDAW](https://github.com/rations/jackdaw-renku)
+  by `tools/sync-jdbackend.sh` (see `haiku/jdbackend/PROVENANCE`). Fix them there, then sync.
+  `haiku/jdbackend.cmake` builds them (`jdbackend`, and `jack.so` when JACK is installed)
+  for this project and for plug-in projects that build against this SDK.
 
 Plug-ins built on this port live in their own repositories —
 [NAMku](https://github.com/rations/NAMku), a Neural Amp Modeler plugin written directly

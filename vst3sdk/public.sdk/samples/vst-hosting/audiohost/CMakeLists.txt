@@ -1,15 +1,16 @@
 
 if(SMTG_ENABLE_VST3_HOSTING_EXAMPLES)
  
-    # The media server: on Haiku the Media Kit backend (the jdbackend_mediakit
-    # library, defined by the project that includes this SDK), JACK elsewhere.
+    # The media server: on Haiku JackDAW's audio backends (the jdbackend
+    # library, defined by the project that includes this SDK; the Media Kit by
+    # default), JACK elsewhere.
     include(SMTG_FindJack)
-    if(SMTG_HAIKU AND TARGET jdbackend_mediakit)
+    if(SMTG_HAIKU AND TARGET jdbackend)
         set(audiohost_media_sources
-            source/media/mediakit/mediakitclient.cpp
-            source/media/mediakit/mediakitclient.h
+            source/media/jdbackend/jdbackendclient.cpp
+            source/media/jdbackend/jdbackendclient.h
         )
-        set(audiohost_media_LIBS jdbackend_mediakit)
+        set(audiohost_media_LIBS jdbackend)
         set(audiohost_media_INCLUDES)
         set(audiohost_media_FOUND TRUE)
     elseif(${LIBJACK_FOUND})

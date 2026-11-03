@@ -1,8 +1,9 @@
 # vst3host / vst3jackhost — headless VST3 host with a stdin parameter REPL and
 # the plug-in's native editor window. Reuses the SDK audiohost sample's
 # AudioClient glue with one of its media servers:
-#   vst3host      the native Media Kit (always built on Haiku)
-#   vst3jackhost  JACK (built when JACK is found)
+#   vst3host      JackDAW's audio backends: the native Media Kit, or JACK
+#                 through the jack.so add-on (--backend jack); always built
+#   vst3jackhost  the SDK's own JACK client (built when JACK is found)
 
 set(SDK_DIR ${CMAKE_SOURCE_DIR}/vst3sdk)
 set(AUDIOHOST_DIR ${SDK_DIR}/public.sdk/samples/vst-hosting/audiohost)
@@ -29,16 +30,19 @@ function(vst3host_target target)
     )
 endfunction()
 
-# Media Kit
+# Media Kit or JACK (add-on)
 add_executable(vst3host
     ${vst3host_common_sources}
-    ${AUDIOHOST_DIR}/source/media/mediakit/mediakitclient.cpp
+    ${AUDIOHOST_DIR}/source/media/jdbackend/jdbackendclient.cpp
 )
 vst3host_target(vst3host)
-target_compile_definitions(vst3host PRIVATE VST3HOST_MEDIAKIT)
-target_link_libraries(vst3host PRIVATE jdbackend_mediakit)
+target_compile_definitions(vst3host PRIVATE VST3HOST_JDBACKEND)
+target_link_libraries(vst3host PRIVATE jdbackend)
+if(TARGET jdbackend_jack)
+    add_dependencies(vst3host jdbackend_jack)
+endif()
 
-# JACK
+# The SDK's JACK client
 if(NOT ${LIBJACK_FOUND})
     message(STATUS "[VST3-renku] JACK not found - skipping vst3jackhost.")
     return()

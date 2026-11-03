@@ -2,9 +2,9 @@
 // Project     : VST SDK
 //
 // Category    : AudioHost
-// Filename    : public.sdk/samples/vst-hosting/audiohost/source/media/mediakit/mediakitclient.cpp
+// Filename    : public.sdk/samples/vst-hosting/audiohost/source/media/jdbackend/jdbackendclient.cpp
 // Created by  : rations 11.2026
-// Description : Audio Host Example for VST 3 using the Haiku/RenkuOS Media Kit
+// Description : Audio Host Example for VST 3 on the Haiku/RenkuOS Media Kit or JACK
 //
 //-----------------------------------------------------------------------------
 // This file is part of a Steinberg SDK. It is subject to the license terms
@@ -14,22 +14,23 @@
 // or distributed except according to the terms contained in the LICENSE file.
 //-----------------------------------------------------------------------------
 
-// The Media Kit counterpart of jack/jackclient.cpp. It does not talk to the
-// Media Kit itself: it drives JackDAW's Media Kit backend (one media node
-// that is a buffer producer and consumer, slaved to the system time source,
-// period taken from the system mixer), which offers the JACK-shaped calls
-// of engine/audio_backend.h. That code is kept unchanged in haiku/jdbackend
-// of this repository.
+// The counterpart of jack/jackclient.cpp for Haiku. It does not talk to an
+// audio system itself: it drives one of JackDAW's audio backends (the table of
+// JACK-shaped calls in engine/audio_backend.h), kept unchanged in haiku/jdbackend
+// of this repository: the Media Kit node (one media node that is a buffer
+// producer and consumer, slaved to the system time source, period taken from
+// the system mixer) or JACK.
 //
-// Threads: every callback (process, buffer_size) runs on the node's control
-// thread, one at a time, so the IAudioClient is never re-entered. The sample
-// rate and the largest block are given to the IAudioClient before the node
-// starts, and a later period change only changes numSamples (the backend
-// never goes above JD_MAX_PERIOD or its period at open, whichever is
-// longer), so the plug-in is not restarted when the buffer size changes.
+// Threads: the backend calls process and buffer_size on its audio thread (the
+// node's control thread, or JACK's process thread), one at a time, so the
+// IAudioClient is never re-entered. The sample rate and the largest block are
+// given to the IAudioClient before the backend starts, and a later period
+// change only changes numSamples (a longer period than the plug-in was
+// prepared for is processed in pieces), so the plug-in is not restarted when
+// the buffer size changes.
 
 #include "public.sdk/samples/vst-hosting/audiohost/source/media/imediaserver.h"
-#include "public.sdk/samples/vst-hosting/audiohost/source/media/mediakit/mediakitclient.h"
+#include "public.sdk/samples/vst-hosting/audiohost/source/media/jdbackend/jdbackendclient.h"
 
 #include "engine/audio_backend.h"
 
@@ -43,14 +44,14 @@ namespace Steinberg {
 namespace Vst {
 
 //------------------------------------------------------------------------
-//  MediaKitClient
+//  JdBackendClient
 //------------------------------------------------------------------------
-class MediaKitClient : public IMediaServer
+class JdBackendClient : public IMediaServer
 {
 public:
 //--------------------------------------------------------------------
-	MediaKitClient () = default;
-	~MediaKitClient () override;
+	explicit JdBackendClient (const JdBackend* backend) : backend (backend) {}
+	~JdBackendClient () override;
 
 	// IMediaServer interface
 	bool registerAudioClient (IAudioClient* client) override;
@@ -58,14 +59,17 @@ public:
 
 	bool initialize (const AudioClientName& name);
 
-	// backend callbacks (node control thread)
+	// backend callbacks (audio thread, except shutdown)
 	int process (jd_nframes_t nframes);
 	void xrun () { xruns.fetch_add (1, std::memory_order_relaxed); }
+	void shutdown () { serverGone.store (true, std::memory_order_relaxed); }
 
 	const JdBackend* backend = nullptr;
 	std::string error;
 	std::vector<JdPort*> audioInputPorts;
+	std::vector<std::vector<std::string>> inputConnections; // made through HostAudio::
 	std::atomic<int32_t> xruns {0};
+	std::atomic<bool> serverGone {false};
 
 	static constexpr int32_t kMaxMidiPorts = 16;
 	JdPort* midiInputPorts[kMaxMidiPorts] {};
@@ -74,12 +78,16 @@ public:
 //--------------------------------------------------------------------
 private:
 	void processMidi (jd_nframes_t nframes);
+	void connectPlayback ();
 
 	bool opened = false;
 	bool monoToStereo = false; // a single output channel also feeds out_2
+	jd_nframes_t maxBlock = 0; // the largest block the plug-in is prepared for
 	std::vector<JdPort*> audioOutputPorts;
 	std::vector<float*> audioOutputPointers;
 	std::vector<float*> audioInputPointers;
+	std::vector<float*> pieceOutputPointers;
+	std::vector<float*> pieceInputPointers;
 	IAudioClient::Buffers buffers {nullptr, 0, nullptr, 0, 0};
 	std::atomic<IAudioClient*> audioClient {nullptr};
 	std::atomic<IMidiClient*> midiClient {nullptr};
@@ -87,85 +95,102 @@ private:
 };
 
 //------------------------------------------------------------------------
-// The one media server of this process (the Media Kit node is one per
-// process). Set and cleared on the thread that creates and destroys the
-// audio client; the MediaKit:: calls below are made from that thread too.
-static MediaKitClient* gMediaKitClient = nullptr;
+// The backend the next media server uses, and the one media server of this
+// process (each backend is one node or client per process). Set and cleared
+// on the thread that creates and destroys the audio client; the HostAudio::
+// calls below are made from that thread too.
+static const JdBackend* gSelectedBackend = nullptr;
+static JdBackendClient* gClient = nullptr;
 static std::string gLastError;
 
 //------------------------------------------------------------------------
-static int mediakit_on_process (jd_nframes_t nframes, void* arg)
+static const JdBackend* selectedBackend ()
 {
-	return reinterpret_cast<MediaKitClient*> (arg)->process (nframes);
+	if (!gSelectedBackend)
+		gSelectedBackend = jackdaw_mediakit_backend_entry (JD_BACKEND_ABI);
+	return gSelectedBackend;
 }
 
 //------------------------------------------------------------------------
-static void mediakit_on_xrun (void* arg)
+static int jdbackend_on_process (jd_nframes_t nframes, void* arg)
 {
-	reinterpret_cast<MediaKitClient*> (arg)->xrun ();
+	return reinterpret_cast<JdBackendClient*> (arg)->process (nframes);
+}
+
+//------------------------------------------------------------------------
+static void jdbackend_on_xrun (void* arg)
+{
+	reinterpret_cast<JdBackendClient*> (arg)->xrun ();
+}
+
+//------------------------------------------------------------------------
+static void jdbackend_on_shutdown (void* arg)
+{
+	reinterpret_cast<JdBackendClient*> (arg)->shutdown ();
 }
 
 //------------------------------------------------------------------------
 IMediaServerPtr createMediaServer (const AudioClientName& name)
 {
-	auto client = std::make_shared<MediaKitClient> ();
+	auto client = std::make_shared<JdBackendClient> (selectedBackend ());
 	if (!client->initialize (name))
-		fprintf (stderr, "[MediaKit] %s\n", client->error.data ());
+		fprintf (stderr, "[audio] %s\n", client->error.data ());
 	return client;
 }
 
 //------------------------------------------------------------------------
-MediaKitClient::~MediaKitClient ()
+JdBackendClient::~JdBackendClient ()
 {
 	if (opened)
-		backend->close (); // stops the cycles; all ports go with the node
-	if (gMediaKitClient == this)
-		gMediaKitClient = nullptr;
+		backend->close (); // stops the cycles; all ports go with it
+	if (gClient == this)
+		gClient = nullptr;
 }
 
 //------------------------------------------------------------------------
-bool MediaKitClient::initialize (const AudioClientName& name)
+bool JdBackendClient::initialize (const AudioClientName& name)
 {
-	if (gMediaKitClient)
+	if (gClient)
 	{
-		error = "only one Media Kit audio client per process";
+		error = "only one audio client per process";
 		gLastError = error;
 		return false;
 	}
-	backend = jackdaw_mediakit_backend_entry (JD_BACKEND_ABI);
 	if (!backend)
 	{
-		error = "the Media Kit backend does not match its header";
+		error = "the audio backend does not match its header";
 		gLastError = error;
 		return false;
 	}
 
-	jackdaw_mediakit_set_node_name (name.data ());
+	if (backend == jackdaw_mediakit_backend_entry (JD_BACKEND_ABI))
+		jackdaw_mediakit_set_node_name (name.data ());
 
 	JdBackendCallbacks callbacks {};
-	callbacks.process = mediakit_on_process;
-	callbacks.xrun = mediakit_on_xrun;
+	callbacks.process = jdbackend_on_process;
+	callbacks.xrun = jdbackend_on_xrun;
+	callbacks.shutdown = jdbackend_on_shutdown;
 	char message[256] = "";
 	if (backend->open (name.data (), &callbacks, this, message, sizeof (message)) != 0)
 	{
-		error = message[0] ? message : "could not open the Media Kit node";
+		error = message[0] ? message : "could not open the audio backend";
 		gLastError = error;
 		return false;
 	}
 	opened = true;
-	gMediaKitClient = this;
+	gClient = this;
 	gLastError.clear ();
 	return true;
 }
 
 //------------------------------------------------------------------------
-bool MediaKitClient::registerAudioClient (IAudioClient* client)
+bool JdBackendClient::registerAudioClient (IAudioClient* client)
 {
 	if (!opened || audioClient.load () || !client)
 		return false;
 
-	// One mono port per channel: out_1, out_2, ... (out_1 and out_2 are the
-	// node's "Master" output) and in_1, in_2, ...
+	// One mono port per channel: out_1, out_2, ... (on the Media Kit out_1 and
+	// out_2 are the node's "Master" output) and in_1, in_2, ...
 	const auto ioSetup = client->getIOSetup ();
 	char portName[32];
 	for (size_t i = 0; i < ioSetup.outputs.size (); ++i)
@@ -201,24 +226,24 @@ bool MediaKitClient::registerAudioClient (IAudioClient* client)
 		}
 		audioInputPorts.push_back (port);
 	}
+	inputConnections.assign (audioInputPorts.size (), {});
 
 	// Each array is sized by its own port count.
 	audioOutputPointers.assign (audioOutputPorts.size (), nullptr);
 	audioInputPointers.assign (audioInputPorts.size (), nullptr);
-	buffers.outputs = audioOutputPointers.data ();
+	pieceOutputPointers.assign (audioOutputPorts.size (), nullptr);
+	pieceInputPointers.assign (audioInputPorts.size (), nullptr);
 	buffers.numOutputs = monoToStereo ? 1 : static_cast<int32_t> (audioOutputPointers.size ());
-	buffers.inputs = audioInputPointers.data ();
 	buffers.numInputs = static_cast<int32_t> (audioInputPointers.size ());
 
 	// The rate first: AudioClient only prepares its buffers once it has both,
 	// and does so in setBlockSize.
 	const auto rate = backend->sample_rate ();
-	const auto period = backend->buffer_size ();
-	const auto maxBlock = std::max<jd_nframes_t> (period, JD_MAX_PERIOD);
+	maxBlock = std::max<jd_nframes_t> (backend->buffer_size (), JD_MAX_PERIOD);
 	if (!client->setSamplerate (static_cast<SampleRate> (rate)) ||
 	    !client->setBlockSize (static_cast<int32> (maxBlock)))
 	{
-		error = "the plug-in refused the Media Kit sample rate or block size";
+		error = "the plug-in refused the sample rate or block size";
 		gLastError = error;
 		return false;
 	}
@@ -227,20 +252,39 @@ bool MediaKitClient::registerAudioClient (IAudioClient* client)
 	if (backend->activate () != 0)
 	{
 		audioClient.store (nullptr, std::memory_order_release);
-		error = "could not start the Media Kit node";
+		error = "could not start the audio backend";
 		gLastError = error;
 		return false;
 	}
+	connectPlayback ();
 	return true;
 }
 
 //------------------------------------------------------------------------
-bool MediaKitClient::registerMidiClient (IMidiClient* client)
+// JACK: the first two outputs go to the first two physical playback ports, as
+// jackclient.cpp does. The Media Kit lists none (the node connects its Master
+// output to the system mixer itself).
+void JdBackendClient::connectPlayback ()
+{
+	const char** ports = backend->get_ports (JD_PORT_AUDIO, JD_PORT_INPUT | JD_PORT_PHYSICAL);
+	if (!ports)
+		return;
+	for (size_t i = 0; i < audioOutputPorts.size () && i < 2 && ports[i]; ++i)
+	{
+		const char* name = backend->port_name (audioOutputPorts[i]);
+		if (name && backend->connect (name, ports[i]) != 0)
+			fprintf (stderr, "[audio] could not connect %s to %s\n", name, ports[i]);
+	}
+	backend->free_ports (ports);
+}
+
+//------------------------------------------------------------------------
+bool JdBackendClient::registerMidiClient (IMidiClient* client)
 {
 	if (!opened || midiClient.load () || !client)
 		return false;
 
-	// The node may already be running: a port is published to the process
+	// The backend may already be running: a port is published to the process
 	// callback only after it is registered.
 	const auto ioSetup = client->getMidiIOSetup ();
 	char portName[32];
@@ -261,7 +305,7 @@ bool MediaKitClient::registerMidiClient (IMidiClient* client)
 }
 
 //------------------------------------------------------------------------
-void MediaKitClient::processMidi (jd_nframes_t nframes)
+void JdBackendClient::processMidi (jd_nframes_t nframes)
 {
 	auto* client = midiClient.load (std::memory_order_acquire);
 	const int32_t count = numMidiPorts.load (std::memory_order_acquire);
@@ -291,19 +335,35 @@ void MediaKitClient::processMidi (jd_nframes_t nframes)
 }
 
 //------------------------------------------------------------------------
-int MediaKitClient::process (jd_nframes_t nframes)
+int JdBackendClient::process (jd_nframes_t nframes)
 {
 	auto* client = audioClient.load (std::memory_order_acquire);
 	for (size_t i = 0; i < audioOutputPorts.size (); ++i)
 		audioOutputPointers[i] = static_cast<float*> (backend->port_buffer (audioOutputPorts[i], nframes));
 	for (size_t i = 0; i < audioInputPorts.size (); ++i)
 		audioInputPointers[i] = static_cast<float*> (backend->port_buffer (audioInputPorts[i], nframes));
-	buffers.numSamples = static_cast<int32_t> (nframes);
 
 	processMidi (nframes);
 
+	// In pieces of at most the block the plug-in was prepared for (JACK can be
+	// given a longer period while running). MIDI events all go to the first.
+	bool ok = client != nullptr;
+	for (jd_nframes_t done = 0; ok && done < nframes;)
+	{
+		const jd_nframes_t n = std::min (nframes - done, maxBlock);
+		for (size_t i = 0; i < pieceOutputPointers.size (); ++i)
+			pieceOutputPointers[i] = audioOutputPointers[i] ? audioOutputPointers[i] + done : nullptr;
+		for (size_t i = 0; i < pieceInputPointers.size (); ++i)
+			pieceInputPointers[i] = audioInputPointers[i] ? audioInputPointers[i] + done : nullptr;
+		buffers.outputs = pieceOutputPointers.data ();
+		buffers.inputs = pieceInputPointers.data ();
+		buffers.numSamples = static_cast<int32_t> (n);
+		ok = client->process (buffers, frameCounter + done);
+		done += n;
+	}
+
 	// A stopped or not yet started plug-in, or one that fails, is silent.
-	if (!client || !client->process (buffers, frameCounter))
+	if (!ok)
 	{
 		for (auto* out : audioOutputPointers)
 			if (out)
@@ -318,15 +378,39 @@ int MediaKitClient::process (jd_nframes_t nframes)
 }
 
 //------------------------------------------------------------------------
-namespace MediaKit {
+namespace HostAudio {
+
+//------------------------------------------------------------------------
+bool selectBackend (const std::string& which, const std::string& appName,
+                    const std::string& envVar, std::string& error)
+{
+	char message[512] = "";
+	const JdBackend* backend =
+	    audio_backend_load_for (which.data (), appName.data (),
+	                            envVar.empty () ? nullptr : envVar.data (), message, sizeof (message));
+	if (!backend)
+	{
+		error = message[0] ? message : "unknown audio backend";
+		return false;
+	}
+	gSelectedBackend = backend;
+	return true;
+}
+
+//------------------------------------------------------------------------
+std::string backendName ()
+{
+	const JdBackend* backend = gClient ? gClient->backend : selectedBackend ();
+	return backend && backend->name ? backend->name : "";
+}
 
 //------------------------------------------------------------------------
 static std::vector<std::string> portList (int type, int flags)
 {
 	std::vector<std::string> result;
-	if (!gMediaKitClient)
+	if (!gClient)
 		return result;
-	const auto* backend = gMediaKitClient->backend;
+	const auto* backend = gClient->backend;
 	if (const char** ports = backend->get_ports (type, flags))
 	{
 		for (int i = 0; ports[i]; ++i)
@@ -337,37 +421,47 @@ static std::vector<std::string> portList (int type, int flags)
 }
 
 //------------------------------------------------------------------------
-bool isRunning () { return gMediaKitClient != nullptr; }
-std::string lastError () { return gLastError; }
+bool isRunning ()
+{
+	return gClient != nullptr && !gClient->serverGone.load (std::memory_order_relaxed);
+}
+
+//------------------------------------------------------------------------
+std::string lastError ()
+{
+	if (gClient && gClient->serverGone.load (std::memory_order_relaxed))
+		return "the audio server went away";
+	return gLastError;
+}
 
 //------------------------------------------------------------------------
 uint32_t sampleRate ()
 {
-	return gMediaKitClient ? gMediaKitClient->backend->sample_rate () : 0;
+	return gClient ? gClient->backend->sample_rate () : 0;
 }
 
 //------------------------------------------------------------------------
 uint32_t blockSize ()
 {
-	return gMediaKitClient ? gMediaKitClient->backend->buffer_size () : 0;
+	return gClient ? gClient->backend->buffer_size () : 0;
 }
 
 //------------------------------------------------------------------------
 int32_t xrunCount ()
 {
-	return gMediaKitClient ? gMediaKitClient->xruns.load (std::memory_order_relaxed) : 0;
+	return gClient ? gClient->xruns.load (std::memory_order_relaxed) : 0;
 }
 
 //------------------------------------------------------------------------
 int32_t numAudioInputs ()
 {
-	return gMediaKitClient ? static_cast<int32_t> (gMediaKitClient->audioInputPorts.size ()) : 0;
+	return gClient ? static_cast<int32_t> (gClient->audioInputPorts.size ()) : 0;
 }
 
 //------------------------------------------------------------------------
 int32_t numMidiInputs ()
 {
-	return gMediaKitClient ? gMediaKitClient->numMidiPorts.load (std::memory_order_acquire) : 0;
+	return gClient ? gClient->numMidiPorts.load (std::memory_order_acquire) : 0;
 }
 
 //------------------------------------------------------------------------
@@ -383,11 +477,19 @@ std::vector<std::string> midiSources ()
 }
 
 //------------------------------------------------------------------------
+std::vector<std::string> audioInputConnections (int32_t input)
+{
+	if (input < 0 || input >= numAudioInputs ())
+		return {};
+	return gClient->inputConnections[static_cast<size_t> (input)];
+}
+
+//------------------------------------------------------------------------
 static bool connectPort (JdPort* port, const std::string& source, bool connect)
 {
 	if (!port)
 		return false;
-	const auto* backend = gMediaKitClient->backend;
+	const auto* backend = gClient->backend;
 	const char* destination = backend->port_name (port);
 	if (!destination)
 		return false;
@@ -400,7 +502,12 @@ bool connectAudioInput (int32_t input, const std::string& source)
 {
 	if (input < 0 || input >= numAudioInputs ())
 		return false;
-	return connectPort (gMediaKitClient->audioInputPorts[input], source, true);
+	if (!connectPort (gClient->audioInputPorts[static_cast<size_t> (input)], source, true))
+		return false;
+	auto& list = gClient->inputConnections[static_cast<size_t> (input)];
+	if (std::find (list.begin (), list.end (), source) == list.end ())
+		list.push_back (source);
+	return true;
 }
 
 //------------------------------------------------------------------------
@@ -408,7 +515,11 @@ bool disconnectAudioInput (int32_t input, const std::string& source)
 {
 	if (input < 0 || input >= numAudioInputs ())
 		return false;
-	return connectPort (gMediaKitClient->audioInputPorts[input], source, false);
+	if (!connectPort (gClient->audioInputPorts[static_cast<size_t> (input)], source, false))
+		return false;
+	auto& list = gClient->inputConnections[static_cast<size_t> (input)];
+	list.erase (std::remove (list.begin (), list.end (), source), list.end ());
+	return true;
 }
 
 //------------------------------------------------------------------------
@@ -416,10 +527,10 @@ bool connectMidiInput (int32_t input, const std::string& source)
 {
 	if (input < 0 || input >= numMidiInputs ())
 		return false;
-	return connectPort (gMediaKitClient->midiInputPorts[input], source, true);
+	return connectPort (gClient->midiInputPorts[input], source, true);
 }
 
 //------------------------------------------------------------------------
-} // MediaKit
+} // HostAudio
 } // Vst
 } // Steinberg

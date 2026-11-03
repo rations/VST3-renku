@@ -1,6 +1,7 @@
 #!/bin/sh
 # make-hpkg.sh — build the VST3-renku packages on a running RenkuOS (x86_64):
-#   vst3_renku       vst3host (Media Kit) + the SDK example plug-ins; no JACK
+#   vst3_renku       vst3host (Media Kit; JACK through its add-on) + the SDK example
+#                    plug-ins; does not require jack
 #   vst3_renku_jack  vst3jackhost (JACK); only if jack (libjack) is installed
 #
 # NAMku/DRUMku are packaged separately, so this build excludes them.
@@ -27,6 +28,11 @@ mkdir -p "$STAGE/bin" "$STAGE/add-ons/media/VST3"
 HOST=$(find build -type f -name vst3host | head -1)
 [ -n "$HOST" ] || { echo "!! vst3host not built" >&2; exit 1; }
 cp "$HOST" "$STAGE/bin/vst3host"
+# vst3host --backend jack loads this; without the jack package it reports that.
+if [ -f build/bin/Release/backends/jack.so ]; then
+	mkdir -p "$STAGE/add-ons/vst3host"
+	cp build/bin/Release/backends/jack.so "$STAGE/add-ons/vst3host/jack.so"
+fi
 
 # Copy every built .vst3 bundle except the ones with their own packages.
 find build -type d -name '*.vst3' | while read -r b; do

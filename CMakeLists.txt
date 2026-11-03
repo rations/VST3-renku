@@ -30,18 +30,10 @@ set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "run manually instead" FORCE)
 # per-target symlinks into the user's add-ons directory.
 set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "install via Makefile instead" FORCE)
 
-# The Media Kit audio backend: JackDAW's, kept unchanged in haiku/jdbackend
-# (tools/sync-jdbackend.sh). The SDK audiohost sample and vst3host run on it
-# instead of JACK. Defined before the SDK, whose audiohost looks for it.
-add_library(jdbackend_mediakit STATIC
-    haiku/jdbackend/backend/mediakit/mediakit_backend.cpp
-    haiku/jdbackend/engine/rt_ringbuffer.c
-)
-target_include_directories(jdbackend_mediakit PUBLIC haiku/jdbackend)
-target_compile_features(jdbackend_mediakit PRIVATE cxx_std_17)
-target_compile_options(jdbackend_mediakit PRIVATE -Wall -Wextra)
-set_target_properties(jdbackend_mediakit PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(jdbackend_mediakit PUBLIC media midi2 be)
+# The audio backends: JackDAW's Media Kit node and JACK add-on, kept unchanged
+# in haiku/jdbackend (tools/sync-jdbackend.sh). The SDK audiohost sample and
+# vst3host run on them. Defined before the SDK, whose audiohost looks for them.
+include(haiku/jdbackend.cmake)
 
 add_subdirectory(vst3sdk)
 

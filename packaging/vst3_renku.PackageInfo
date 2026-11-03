@@ -5,9 +5,9 @@ summary			"VST3 host on the native Media Kit, and example VST3 plug-ins (RenkuOS
 description		"A headless VST3 host (vst3host) on the RenkuOS Media Kit, built on the
 Haiku port of the Steinberg VST3 SDK, plus the SDK's example plug-ins (adelay,
 the mda suite, ...). It runs one plug-in as a media node: its outputs go to the
-system mixer and its inputs are patched in Cortex or from its command line; no
-JACK is needed. The JACK version of the host is the separate vst3_renku_jack
-package. The VST3 SDK itself is a build-time dependency of JackDAW and the
+system mixer and its inputs are connected from its command line; no JACK is
+needed. With the jack package installed it also runs on JACK (--backend jack).
+The SDK's own JACK host, vst3jackhost, is the separate vst3_renku_jack package. The VST3 SDK itself is a build-time dependency of JackDAW and the
 plug-ins and is linked statically."
 packager		"rations <ehqcar@proton.me>"
 vendor			"rations"
