@@ -2,7 +2,7 @@
 #
 # Builds the vendored, Haiku-patched Steinberg VST 3 SDK in a headless
 # configuration (no VSTGUI, no X11): core libraries, the validator, the
-# moduleinfotool, the JACK-based audiohost sample, and the SDK example
+# moduleinfotool, the audiohost sample (on the Media Kit), and the SDK example
 # plug-ins (adelay, mda-vst3, ... — the VSTGUI-based examples exclude
 # themselves). Our own hosts/ and plugins/ subdirectories are added on top.
 
@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.25.0)
 
 project(VST3-haiku
     VERSION 0.1.0
-    DESCRIPTION "Native VST3 for Haiku: SDK port, JACK host, plugins"
+    DESCRIPTION "Native VST3 for Haiku/RenkuOS: SDK port, Media Kit and JACK hosts, plugins"
 )
 
 # Headless SDK configuration. VSTGUI (and with it every X11/cairo/pango
@@ -30,6 +30,19 @@ set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "run manually instead" FORCE)
 # per-target symlinks into the user's add-ons directory.
 set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "install via Makefile instead" FORCE)
 
+# The Media Kit audio backend: JackDAW's, kept unchanged in haiku/jdbackend
+# (tools/sync-jdbackend.sh). The SDK audiohost sample and vst3host run on it
+# instead of JACK. Defined before the SDK, whose audiohost looks for it.
+add_library(jdbackend_mediakit STATIC
+    haiku/jdbackend/backend/mediakit/mediakit_backend.cpp
+    haiku/jdbackend/engine/rt_ringbuffer.c
+)
+target_include_directories(jdbackend_mediakit PUBLIC haiku/jdbackend)
+target_compile_features(jdbackend_mediakit PRIVATE cxx_std_17)
+target_compile_options(jdbackend_mediakit PRIVATE -Wall -Wextra)
+set_target_properties(jdbackend_mediakit PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(jdbackend_mediakit PUBLIC media midi2 be)
+
 add_subdirectory(vst3sdk)
 
 # The SDK's plugin helper functions read these directory-scoped variables
@@ -41,7 +54,7 @@ set(public_sdk_SOURCE_DIR "${SDK_ROOT}/public.sdk")
 set(pluginterfaces_SOURCE_DIR "${SDK_ROOT}/pluginterfaces")
 
 # Our own targets
-add_subdirectory(hosts/vst3jackhost)
+add_subdirectory(hosts/vst3host)
 
 # NAMku (the Neural Amp Modeler plug-in) lives in its own repository; build
 # it against this SDK when it is checked out alongside this one.

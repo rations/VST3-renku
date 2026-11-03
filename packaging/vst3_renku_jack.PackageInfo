@@ -1,0 +1,28 @@
+name			vst3_renku_jack
+version			0.4.0-1
+architecture	x86_64
+summary			"VST3 host on JACK (RenkuOS)"
+description		"vst3jackhost: the same headless VST3 host as vst3host in vst3_renku,
+running on JACK instead of the Media Kit. Handy for trying VST3 plug-ins against
+a running jackd without a DAW."
+packager		"rations <ehqcar@proton.me>"
+vendor			"rations"
+copyrights {
+	"2025 Steinberg Media Technologies GmbH"
+	"2026 rations"
+}
+licenses {
+	"MIT"
+}
+provides {
+	vst3_renku_jack = 0.4.0
+	cmd:vst3jackhost = 0.4.0
+}
+requires {
+	haiku
+	jack
+	vst3_renku
+}
+urls {
+	"https://github.com/rations/VST3-renku"
+}

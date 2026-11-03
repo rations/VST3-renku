@@ -1,10 +1,16 @@
-// vst3jackhost — VST3 host for Haiku on JACK, with a stdin parameter REPL and an
-// optional native editor window (IPlugView, kPlatformTypeHaikuBView).
+// vst3host / vst3jackhost — VST3 host for Haiku/RenkuOS, with a stdin parameter
+// REPL and an optional native editor window (IPlugView, kPlatformTypeHaikuBView).
 //
-// Loads one VST3 audio-effect class from a .vst3 bundle, wires it between JACK
-// ports (reusing the SDK audiohost sample's AudioClient/JackClient), and lets the
-// user inspect and change parameters from the terminal. Parameter changes reach
+// Loads one VST3 audio-effect class from a .vst3 bundle and runs it on the SDK
+// audiohost sample's AudioClient, with one of its media servers: the native
+// Media Kit (vst3host, VST3HOST_MEDIAKIT defined) or JACK (vst3jackhost). The
+// user inspects and changes parameters from the terminal. Parameter changes reach
 // the real-time thread only through AudioClient's lock-free ParameterChangeTransfer.
+//
+// Media Kit: the plug-in is one media node, named after its class. Its first two
+// outputs are connected to the system mixer; inputs are connected with --in or
+// the REPL's connect command, or patched in Cortex. MIDI inputs are Midi Kit
+// endpoints "<class> MIDI in N" (--midi-in, midiconnect, or PatchBay).
 //
 // Threading: main() owns the BApplication and runs its message loop; the REPL
 // runs on a separate thread. While no editor window is open, the REPL touches
@@ -13,13 +19,18 @@
 // synchronous), so the controller is only ever driven from one thread at a time.
 //
 // Usage:
+//   vst3host <plugin.vst3> [--uid <class-UID>] [--in <source>]... [--midi-in <source>]...
 //   vst3jackhost <plugin.vst3> [--uid <class-UID>]
-//   vst3jackhost <plugin.vst3> --list
+//   vst3host|vst3jackhost <plugin.vst3> --list
 //
 // REPL commands: help, list, params, get <id>, set <id> <normalized 0..1>,
-//                editor, editor close, savestate <file>, loadstate <file>, quit
+//                editor, editor close, savestate <file>, loadstate <file>, quit;
+//                Media Kit only: inputs, connect, disconnect, midi, midiconnect, status
 
 #include "public.sdk/samples/vst-hosting/audiohost/source/media/audioclient.h"
+#ifdef VST3HOST_MEDIAKIT
+#include "public.sdk/samples/vst-hosting/audiohost/source/media/mediakit/mediakitclient.h"
+#endif
 #include "public.sdk/source/common/memorystream.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/hosting/module.h"
@@ -48,8 +59,88 @@
 
 using namespace Steinberg;
 
+#ifdef VST3HOST_MEDIAKIT
+#define HOST_NAME "vst3host"
+#define HOST_USAGE                                                                                 \
+    "usage: vst3host <plugin.vst3> [--uid <class-UID>] [--in <source>]... "                        \
+    "[--midi-in <source>]... [--list]\n"
+#else
+#define HOST_NAME "vst3jackhost"
+#define HOST_USAGE "usage: vst3jackhost <plugin.vst3> [--uid <class-UID>] [--list]\n"
+#endif
+
 namespace
 {
+
+#ifdef VST3HOST_MEDIAKIT
+// A source named in full, or by a piece of its name that only one source has
+// ("UMC204HD / output 0 / 1" or just "UMC204HD"). Empty if none or several match.
+std::string findSource(const std::vector<std::string> &sources, const std::string &text)
+{
+    std::string match;
+    int matches = 0;
+    for (const auto &source : sources) {
+        if (source == text)
+            return source;
+        if (source.find(text) != std::string::npos) {
+            match = source;
+            ++matches;
+        }
+    }
+    if (matches == 1)
+        return match;
+    printf("%s '%s'; sources:\n", matches ? "more than one source matches" : "no source matches",
+           text.c_str());
+    for (const auto &source : sources)
+        printf("  %s\n", source.c_str());
+    return std::string();
+}
+
+// The rest of a REPL line, without leading spaces.
+std::string restOfLine(std::istringstream &iss)
+{
+    std::string rest;
+    std::getline(iss, rest);
+    size_t start = rest.find_first_not_of(" \t");
+    return start == std::string::npos ? std::string() : rest.substr(start);
+}
+
+bool connectInput(int32_t input, const std::string &text, bool connect)
+{
+    std::string source = findSource(Vst::MediaKit::audioSources(), text);
+    if (source.empty())
+        return false;
+    bool ok = connect ? Vst::MediaKit::connectAudioInput(input, source)
+                      : Vst::MediaKit::disconnectAudioInput(input, source);
+    printf("%s %s %s input %d: %s\n", connect ? "connect" : "disconnect", source.c_str(),
+           connect ? "->" : "from", (int)input + 1, ok ? "ok" : "FAILED");
+    return ok;
+}
+
+bool connectMidi(int32_t input, const std::string &text)
+{
+    std::string source = findSource(Vst::MediaKit::midiSources(), text);
+    if (source.empty())
+        return false;
+    bool ok = Vst::MediaKit::connectMidiInput(input, source);
+    printf("connect %s -> MIDI input %d: %s\n", source.c_str(), (int)input + 1,
+           ok ? "ok" : "FAILED");
+    return ok;
+}
+
+void printMediaStatus()
+{
+    uint32_t rate = Vst::MediaKit::sampleRate();
+    uint32_t block = Vst::MediaKit::blockSize();
+    // "Late cycles" are the backend's xrun notices: a cycle that started more than a
+    // period late, or an output that had no free buffer. The node runs ahead of the
+    // mixer by its event latency, so a late cycle is not necessarily a dropout.
+    printf("Media Kit: %u Hz, %u frames (%.2f ms), %d late cycles, %d audio inputs, %d MIDI "
+           "inputs\n",
+           rate, block, rate ? 1000.0 * block / rate : 0.0, (int)Vst::MediaKit::xrunCount(),
+           (int)Vst::MediaKit::numAudioInputs(), (int)Vst::MediaKit::numMidiInputs());
+}
+#endif
 
 void printClasses(const VST3::Hosting::PluginFactory &factory)
 {
@@ -119,6 +210,16 @@ void printHelp(bool hasFileLoader)
            "  loadstate <file>  restore the plug-in state from a file\n"
            "  help              this help\n"
            "  quit              exit\n");
+#ifdef VST3HOST_MEDIAKIT
+    printf("Media Kit:\n"
+           "  inputs                    list capture sources (one per channel)\n"
+           "  connect <n> <source>      connect a source to audio input n (1-based)\n"
+           "  disconnect <n> <source>   disconnect it\n"
+           "  midi                      list MIDI sources\n"
+           "  midiconnect <n> <source>  connect a MIDI source to MIDI input n\n"
+           "  status                    rate, buffer size, xruns\n"
+           "  (a source may be given by any part of its name that is unique)\n");
+#endif
     if (hasFileLoader)
         printf("file loading (plug-in supports it):\n"
                "  loadmodel <path>  load a .nam model file\n"
@@ -172,6 +273,8 @@ int main(int argc, char *argv[])
     std::string path;
     std::string uidString;
     bool listOnly = false;
+    std::vector<std::string> audioInputs;
+    std::vector<std::string> midiInputs;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -179,20 +282,27 @@ int main(int argc, char *argv[])
             uidString = argv[++i];
         else if (arg == "--list")
             listOnly = true;
+#ifdef VST3HOST_MEDIAKIT
+        else if (arg == "--in" && i + 1 < argc)
+            audioInputs.push_back(argv[++i]);
+        else if (arg == "--midi-in" && i + 1 < argc)
+            midiInputs.push_back(argv[++i]);
+#endif
         else if (arg == "--help" || arg == "-h") {
-            printf("usage: vst3jackhost <plugin.vst3> [--uid <class-UID>] [--list]\n");
+            printf(HOST_USAGE);
             return 0;
         } else
             path = arg;
     }
     if (path.empty()) {
-        fprintf(stderr, "usage: vst3jackhost <plugin.vst3> [--uid <class-UID>] [--list]\n");
+        fprintf(stderr, HOST_USAGE);
         return 1;
     }
 
-    // The BApplication must exist before any window/BMessageRunner is created;
-    // its message loop runs on this (main) thread at the bottom of main().
-    BApplication app("application/x-vnd.VST3-haiku-vst3jackhost");
+    // The BApplication must exist before any window/BMessageRunner is created
+    // (and before the Media Kit is used); its message loop runs on this (main)
+    // thread at the bottom of main().
+    BApplication app("application/x-vnd.VST3-renku-" HOST_NAME);
 
     // The host context must be in place before any plug-in code runs.
     Vst::PluginContextFactory::instance().setPluginContext(new Vst::HostApplication());
@@ -247,10 +357,18 @@ int main(int argc, char *argv[])
     auto midiMapping = U::cast<Vst::IMidiMapping>(controller);
 
     auto audioClient = Vst::AudioClient::create(className, component, midiMapping);
+#ifdef VST3HOST_MEDIAKIT
+    if (!audioClient || !Vst::MediaKit::isRunning()) {
+        fprintf(stderr, "could not start the Media Kit audio client: %s\n",
+                Vst::MediaKit::lastError().c_str());
+        return 1;
+    }
+#else
     if (!audioClient) {
         fprintf(stderr, "could not create the JACK audio client (is jackd running?)\n");
         return 1;
     }
+#endif
 
     // Route the editor's parameter edits (IComponentHandler::performEdit) to
     // the RT thread; PlugProvider does not install any handler on its own.
@@ -272,7 +390,16 @@ int main(int argc, char *argv[])
     printf("loaded '%s' from %s\n", className.c_str(), path.c_str());
     if (fileLoader)
         printf("plug-in supports file loading (loadmodel/loadir)\n");
+#ifdef VST3HOST_MEDIAKIT
+    printf("Media Kit node '%s' is running; type 'help' for commands.\n", className.c_str());
+    printMediaStatus();
+    for (size_t i = 0; i < audioInputs.size(); ++i)
+        connectInput(static_cast<int32_t>(i), audioInputs[i], true);
+    for (size_t i = 0; i < midiInputs.size(); ++i)
+        connectMidi(static_cast<int32_t>(i), midiInputs[i]);
+#else
     printf("JACK client '%s' is running; type 'help' for commands.\n", className.c_str());
+#endif
 
     // Editor window state, owned by the REPL thread. `editorAlive` is cleared
     // by the window's destructor (window looper thread).
@@ -472,6 +599,36 @@ int main(int argc, char *argv[])
                         printf("loadstate: warning: controller refused the state\n");
                     printf("loadstate: ok (%ld bytes)\n", fileSize);
                 });
+#ifdef VST3HOST_MEDIAKIT
+            } else if (cmd == "inputs") {
+                for (const auto &source : Vst::MediaKit::audioSources())
+                    printf("  %s\n", source.c_str());
+                printf("(%d audio inputs)\n", (int)Vst::MediaKit::numAudioInputs());
+            } else if (cmd == "connect" || cmd == "disconnect") {
+                int n = 0;
+                std::string text;
+                if (!(iss >> n) || (text = restOfLine(iss)).empty()) {
+                    printf("usage: %s <input 1..%d> <source>\n", cmd.c_str(),
+                           (int)Vst::MediaKit::numAudioInputs());
+                    continue;
+                }
+                connectInput(n - 1, text, cmd == "connect");
+            } else if (cmd == "midi") {
+                for (const auto &source : Vst::MediaKit::midiSources())
+                    printf("  %s\n", source.c_str());
+                printf("(%d MIDI inputs)\n", (int)Vst::MediaKit::numMidiInputs());
+            } else if (cmd == "midiconnect") {
+                int n = 0;
+                std::string text;
+                if (!(iss >> n) || (text = restOfLine(iss)).empty()) {
+                    printf("usage: midiconnect <input 1..%d> <source>\n",
+                           (int)Vst::MediaKit::numMidiInputs());
+                    continue;
+                }
+                connectMidi(n - 1, text);
+            } else if (cmd == "status") {
+                printMediaStatus();
+#endif
             } else if (cmd == "files") {
                 if (!fileLoader) {
                     printf("this plug-in does not support file loading\n");

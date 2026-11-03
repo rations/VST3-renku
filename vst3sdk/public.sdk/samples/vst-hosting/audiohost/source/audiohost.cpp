@@ -34,6 +34,10 @@
 #include <wtypes.h>
 #endif
 
+#if SMTG_OS_HAIKU
+#include <Application.h>
+#endif
+
 //------------------------------------------------------------------------
 namespace Steinberg {
 FUnknown* gStandardPluginContext = new Vst::HostApplication ();
@@ -118,6 +122,10 @@ void App::init (const std::vector<std::string>& cmdArgs)
 //------------------------------------------------------------------------
 void App::terminate ()
 {
+	// Stops the media server before the plug-in and its module go away.
+	vst3Processor = nullptr;
+	plugProvider = nullptr;
+	module = nullptr;
 }
 
 //------------------------------------------------------------------------
@@ -138,6 +146,25 @@ int wmain (int argc, wchar_t* argv[])
 	std::cout << "Press <enter> to continue . . .";
 	std::getchar ();
 
+	return 0;
+}
+#elif SMTG_OS_HAIKU
+int main (int argc, char* argv[])
+{
+	// The Media Kit expects a BApplication. Its looper does not need to run,
+	// but it must outlive the media server, which terminate () closes.
+	BApplication application ("application/x-vnd.Steinberg-VST3-audiohost");
+
+	std::vector<std::string> cmdArgs;
+	for (int i = 1; i < argc; ++i)
+		cmdArgs.push_back (argv[i]);
+
+	Steinberg::Vst::AudioHost::gInit.app->init (cmdArgs);
+
+	std::cout << "Press <enter> to continue . . .";
+	std::getchar ();
+
+	Steinberg::Vst::AudioHost::gInit.app->terminate ();
 	return 0;
 }
 #else

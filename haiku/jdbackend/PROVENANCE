@@ -1,0 +1,10 @@
+These files are copied unchanged from JackDAW (jackdaw-renku), MIT licence
+(see LICENSE here), by tools/sync-jdbackend.sh. Do not edit them in this
+repository: change them in JackDAW and sync again.
+
+Source:  https://github.com/rations/jackdaw-renku
+Commit:  f157a7cf528ee20598ff323657b66f99dae8584a
+Files:   src/backend/mediakit/mediakit_backend.cpp -> backend/mediakit/
+         src/engine/audio_backend.h                -> engine/
+         src/engine/rt_ringbuffer.h                -> engine/
+         src/engine/rt_ringbuffer.c                -> engine/

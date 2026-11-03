@@ -21,3 +21,4 @@ build/
 # Built packages: attached to GitHub Releases, never committed.
 packaging/*.hpkg
 packaging/stage/
+packaging/stage-jack/
