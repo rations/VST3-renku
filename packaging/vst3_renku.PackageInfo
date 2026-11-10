@@ -1,5 +1,5 @@
 name			vst3_renku
-version			0.4.0-1
+version			0.4.0-2
 architecture	x86_64
 summary			"VST3 host on the native Media Kit, and example VST3 plug-ins (RenkuOS)"
 description		"A headless VST3 host (vst3host) on the RenkuOS Media Kit, built on the
@@ -24,6 +24,7 @@ provides {
 }
 requires {
 	haiku
+	libsamplerate
 }
 replaces {
 	vst3_haiku

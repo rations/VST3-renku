@@ -68,6 +68,7 @@ public:
 	std::string error;
 	std::vector<JdPort*> audioInputPorts;
 	std::vector<std::vector<std::string>> inputConnections; // made through HostAudio::
+	int32_t numPluginInputs = 0; // the plug-in's input channels (ports or not)
 	std::atomic<int32_t> xruns {0};
 	std::atomic<bool> serverGone {false};
 
@@ -89,6 +90,7 @@ private:
 	std::vector<float*> audioInputPointers;
 	std::vector<float*> pieceOutputPointers;
 	std::vector<float*> pieceInputPointers;
+	std::vector<float> silence; // the input of a plug-in whose inputs have no ports
 	IAudioClient::Buffers buffers {nullptr, 0, nullptr, 0, 0};
 	std::atomic<IAudioClient*> audioClient {nullptr};
 	std::atomic<IMidiClient*> midiClient {nullptr};
@@ -103,6 +105,7 @@ private:
 static const JdBackend* gSelectedBackend = nullptr;
 static JdBackendClient* gClient = nullptr;
 static std::string gLastError;
+static bool gPublishAudioInputs = true;
 
 //------------------------------------------------------------------------
 static const JdBackend* selectedBackend ()
@@ -215,7 +218,8 @@ bool JdBackendClient::registerAudioClient (IAudioClient* client)
 			monoToStereo = true;
 		}
 	}
-	for (size_t i = 0; i < ioSetup.inputs.size (); ++i)
+	numPluginInputs = static_cast<int32_t> (ioSetup.inputs.size ());
+	for (size_t i = 0; gPublishAudioInputs && i < ioSetup.inputs.size (); ++i)
 	{
 		snprintf (portName, sizeof (portName), "in_%u", (unsigned)(i + 1));
 		auto port = backend->port_register (portName, JD_PORT_AUDIO, JD_PORT_INPUT);
@@ -233,14 +237,19 @@ bool JdBackendClient::registerAudioClient (IAudioClient* client)
 	audioOutputPointers.assign (audioOutputPorts.size (), nullptr);
 	audioInputPointers.assign (audioInputPorts.size (), nullptr);
 	pieceOutputPointers.assign (audioOutputPorts.size (), nullptr);
-	pieceInputPointers.assign (audioInputPorts.size (), nullptr);
 	buffers.numOutputs = monoToStereo ? 1 : static_cast<int32_t> (audioOutputPointers.size ());
-	buffers.numInputs = static_cast<int32_t> (audioInputPointers.size ());
+	buffers.numInputs = numPluginInputs;
 
 	// The rate first: AudioClient only prepares its buffers once it has both,
 	// and does so in setBlockSize.
 	const auto rate = backend->sample_rate ();
 	maxBlock = std::max<jd_nframes_t> (backend->buffer_size (), JD_MAX_PERIOD);
+
+	// Inputs without ports read silence (a block's worth, never offset).
+	if (audioInputPorts.empty () && numPluginInputs > 0)
+		silence.assign (maxBlock, 0.f);
+	pieceInputPointers.assign (static_cast<size_t> (numPluginInputs),
+	                           silence.empty () ? nullptr : silence.data ());
 	if (!client->setSamplerate (static_cast<SampleRate> (rate)) ||
 	    !client->setBlockSize (static_cast<int32> (maxBlock)))
 	{
@@ -354,7 +363,7 @@ int JdBackendClient::process (jd_nframes_t nframes)
 		const jd_nframes_t n = std::min (nframes - done, maxBlock);
 		for (size_t i = 0; i < pieceOutputPointers.size (); ++i)
 			pieceOutputPointers[i] = audioOutputPointers[i] ? audioOutputPointers[i] + done : nullptr;
-		for (size_t i = 0; i < pieceInputPointers.size (); ++i)
+		for (size_t i = 0; i < audioInputPointers.size (); ++i)
 			pieceInputPointers[i] = audioInputPointers[i] ? audioInputPointers[i] + done : nullptr;
 		buffers.outputs = pieceOutputPointers.data ();
 		buffers.inputs = pieceInputPointers.data ();
@@ -396,6 +405,12 @@ bool selectBackend (const std::string& which, const std::string& appName,
 	}
 	gSelectedBackend = backend;
 	return true;
+}
+
+//------------------------------------------------------------------------
+void publishAudioInputs (bool publish)
+{
+	gPublishAudioInputs = publish;
 }
 
 //------------------------------------------------------------------------
@@ -478,10 +493,30 @@ std::vector<std::string> midiSources ()
 }
 
 //------------------------------------------------------------------------
+// What the backend says `port` is connected to, whoever connected it (a
+// patchbay too); false if it cannot say for this port.
+static bool backendConnections (JdPort* port, std::vector<std::string>& result)
+{
+	const auto* backend = gClient->backend;
+	if (!port || !backend->port_connections)
+		return false;
+	result.clear ();
+	return backend->port_connections (
+	           port,
+	           [] (const char* name, void* ctx) {
+		           static_cast<std::vector<std::string>*> (ctx)->emplace_back (name);
+	           },
+	           &result) == 0;
+}
+
+//------------------------------------------------------------------------
 std::vector<std::string> audioInputConnections (int32_t input)
 {
 	if (input < 0 || input >= numAudioInputs ())
 		return {};
+	std::vector<std::string> result;
+	if (backendConnections (gClient->audioInputPorts[static_cast<size_t> (input)], result))
+		return result;
 	return gClient->inputConnections[static_cast<size_t> (input)];
 }
 
@@ -490,6 +525,9 @@ std::vector<std::string> midiInputConnections (int32_t input)
 {
 	if (input < 0 || input >= numMidiInputs ())
 		return {};
+	std::vector<std::string> result;
+	if (backendConnections (gClient->midiInputPorts[input], result))
+		return result;
 	return gClient->midiConnections[input];
 }
 

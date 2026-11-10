@@ -10,11 +10,11 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 VERSION=0.4.0
-REVISION=1
+REVISION=2
 STAGE="$HERE/stage"
 STAGE_JACK="$HERE/stage-jack"
 
-pkgman install -y cmake ninja gcc make pkgconfig || true
+pkgman install -y cmake ninja gcc make pkgconfig libsamplerate_devel || true
 export PKG_CONFIG_PATH="/boot/system/non-packaged/lib/pkgconfig:/boot/system/lib/pkgconfig:$PKG_CONFIG_PATH"
 
 cd "$ROOT"

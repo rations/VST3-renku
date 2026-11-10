@@ -52,6 +52,10 @@ namespace HostAudio {
 //! False, with a message for the user in error, if it cannot be loaded.
 bool selectBackend (const std::string& which, const std::string& appName,
                     const std::string& envVar, std::string& error);
+//! Whether the next audio client's input channels get ports (the default).
+//! An instrument that ignores its audio input turns this off, so no input
+//! shows up in Cortex or a patchbay; the plug-in then reads silence there.
+void publishAudioInputs (bool publish);
 //! The selected backend's display name ("Media Kit", "JACK").
 std::string backendName ();
 
@@ -76,9 +80,11 @@ int32_t numMidiInputs ();
 std::vector<std::string> audioSources ();
 //! MIDI sources ("midi:<endpoint>" on the Media Kit, JACK MIDI ports on JACK).
 std::vector<std::string> midiSources ();
-//! The sources connected to audio input `input` (0-based) through these calls.
+//! The sources connected to audio input `input` (0-based). Read from the
+//! backend where it can list them (JACK; MIDI on the Media Kit), so ones made
+//! in a patchbay count too; otherwise the ones made through these calls.
 std::vector<std::string> audioInputConnections (int32_t input);
-//! The sources connected to MIDI input `input` (0-based) through these calls.
+//! The sources connected to MIDI input `input` (0-based), as above.
 std::vector<std::string> midiInputConnections (int32_t input);
 
 //! Connects one source channel to audio input `input` (0-based).
