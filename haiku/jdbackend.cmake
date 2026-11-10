@@ -3,7 +3,8 @@
 # Defines, once per build:
 #   jdbackend       static library: the Media Kit backend (built in) and the
 #                   loader that finds the JACK add-on (audio_backend_load_for).
-#                   Links libmedia/libmidi2/libbe, never libjack.
+#                   Links libmedia/libmidi2/libbe and libsamplerate, never
+#                   libjack.
 #   jdbackend_jack  the JACK backend as an add-on, jack.so, in
 #                   <build>/bin/<config>/backends/ (where the loader looks next
 #                   to an executable). Only when libjack is found.
@@ -29,7 +30,15 @@ target_include_directories(jdbackend PUBLIC ${JDBACKEND_DIR})
 target_compile_features(jdbackend PRIVATE cxx_std_17)
 target_compile_options(jdbackend PRIVATE -Wall -Wextra)
 set_target_properties(jdbackend PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(jdbackend PUBLIC media midi2 be)
+# The Media Kit node converts other apps' audio to its rate with libsamplerate
+# (libsamplerate_devel to build, libsamplerate to run).
+find_path(JDBACKEND_SAMPLERATE_INCLUDE_DIR samplerate.h)
+find_library(JDBACKEND_SAMPLERATE_LIBRARY NAMES samplerate)
+if(NOT JDBACKEND_SAMPLERATE_INCLUDE_DIR OR NOT JDBACKEND_SAMPLERATE_LIBRARY)
+    message(FATAL_ERROR "[jdbackend] libsamplerate not found: pkgman install libsamplerate_devel")
+endif()
+target_include_directories(jdbackend PRIVATE ${JDBACKEND_SAMPLERATE_INCLUDE_DIR})
+target_link_libraries(jdbackend PUBLIC media midi2 be ${JDBACKEND_SAMPLERATE_LIBRARY})
 
 # libjack only, not libjackserver: the add-on is a JACK client.
 find_path(JDBACKEND_JACK_INCLUDE_DIR jack/jack.h)

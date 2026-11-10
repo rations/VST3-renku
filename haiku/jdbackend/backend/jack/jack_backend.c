@@ -1,7 +1,7 @@
 /* jack_backend.c — the JACK implementation of audio_backend.h.
  *
  * A thin layer over the JACK client API: one client, opened with
- * JackNoStartServer, so JackDAW only ever joins a server the user started
+ * JackNoStartServer, so Kasen only ever joins a server the user started
  * (from Jack Graph or jackd). JdPort is the jack_port_t itself, and the RT
  * calls are direct forwards, so the process path costs one indirect call per
  * port buffer.
@@ -246,6 +246,18 @@ static int jb_create_rt_thread(pthread_t *thread, void *(*fn)(void *), void *arg
     return jack_client_create_thread(jb_client, thread, prio, rt, fn, arg);
 }
 
+static int jb_port_connections(JdPort *port, void (*fn)(const char *name, void *ctx), void *ctx)
+{
+    if (!jb_client || !port || !fn)
+        return -1;
+    const char **names = jack_port_get_all_connections(jb_client, (const jack_port_t *)port);
+    for (int i = 0; names && names[i]; i++)
+        fn(names[i], ctx);
+    if (names)
+        jack_free((void *)names);
+    return 0;
+}
+
 static const JdBackend jb_backend = {
     JD_BACKEND_ABI,
     "JACK",
@@ -269,6 +281,7 @@ static const JdBackend jb_backend = {
     jb_disconnect,
     jb_create_rt_thread,
     NULL, /* hold_latency: JACK's port latency does not move */
+    jb_port_connections,
 };
 
 const JdBackend *jackdaw_backend_entry(uint32_t abi)

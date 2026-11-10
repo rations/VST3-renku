@@ -3,7 +3,7 @@ These files are copied unchanged from JackDAW (jackdaw-renku), MIT licence
 repository: change them in JackDAW and sync again.
 
 Source:  https://github.com/rations/jackdaw-renku
-Commit:  f9397263ec0f127943c5d4fac93e216adf887240
+Commit:  5c59e73545dbe76d0627f2ab756a618644c69f8e
 Files:   src/backend/mediakit/mediakit_backend.cpp -> backend/mediakit/
          src/backend/jack/jack_backend.c           -> backend/jack/
          src/engine/audio_backend.h                -> engine/
