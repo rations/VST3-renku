@@ -78,12 +78,15 @@ std::vector<std::string> audioSources ();
 std::vector<std::string> midiSources ();
 //! The sources connected to audio input `input` (0-based) through these calls.
 std::vector<std::string> audioInputConnections (int32_t input);
+//! The sources connected to MIDI input `input` (0-based) through these calls.
+std::vector<std::string> midiInputConnections (int32_t input);
 
 //! Connects one source channel to audio input `input` (0-based).
 bool connectAudioInput (int32_t input, const std::string& source);
 bool disconnectAudioInput (int32_t input, const std::string& source);
 //! Connects a MIDI source to MIDI input `input` (0-based).
 bool connectMidiInput (int32_t input, const std::string& source);
+bool disconnectMidiInput (int32_t input, const std::string& source);
 
 //------------------------------------------------------------------------
 } // HostAudio

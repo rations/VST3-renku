@@ -74,6 +74,7 @@ public:
 	static constexpr int32_t kMaxMidiPorts = 16;
 	JdPort* midiInputPorts[kMaxMidiPorts] {};
 	std::atomic<int32_t> numMidiPorts {0};
+	std::vector<std::string> midiConnections[kMaxMidiPorts]; // made through HostAudio::
 
 //--------------------------------------------------------------------
 private:
@@ -485,6 +486,14 @@ std::vector<std::string> audioInputConnections (int32_t input)
 }
 
 //------------------------------------------------------------------------
+std::vector<std::string> midiInputConnections (int32_t input)
+{
+	if (input < 0 || input >= numMidiInputs ())
+		return {};
+	return gClient->midiConnections[input];
+}
+
+//------------------------------------------------------------------------
 static bool connectPort (JdPort* port, const std::string& source, bool connect)
 {
 	if (!port)
@@ -527,7 +536,24 @@ bool connectMidiInput (int32_t input, const std::string& source)
 {
 	if (input < 0 || input >= numMidiInputs ())
 		return false;
-	return connectPort (gClient->midiInputPorts[input], source, true);
+	if (!connectPort (gClient->midiInputPorts[input], source, true))
+		return false;
+	auto& list = gClient->midiConnections[input];
+	if (std::find (list.begin (), list.end (), source) == list.end ())
+		list.push_back (source);
+	return true;
+}
+
+//------------------------------------------------------------------------
+bool disconnectMidiInput (int32_t input, const std::string& source)
+{
+	if (input < 0 || input >= numMidiInputs ())
+		return false;
+	if (!connectPort (gClient->midiInputPorts[input], source, false))
+		return false;
+	auto& list = gClient->midiConnections[input];
+	list.erase (std::remove (list.begin (), list.end (), source), list.end ());
+	return true;
 }
 
 //------------------------------------------------------------------------
