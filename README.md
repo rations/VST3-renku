@@ -1,19 +1,19 @@
 # VST3-renku
 
-> This repository is the source of the `vst3_renku` and `vst3_renku_jack` packages, part of the
-> [JackDAW stack](https://github.com/rations/jackDAW-renku) for RenkuOS. The 0.5
-> release's `install.sh` is for Haiku hrev60256; there is no RenkuOS release yet.
+> This repository is the source of the `vst3_renku` and `vst3_renku_jack` packages for RenkuOS. Built
+> packages are on its [Releases](https://github.com/rations/VST3-renku/releases) page, and
+> [renku-audio](https://github.com/rations/renku-audio) lists the whole audio stack.
 
 A native port of the [Steinberg VST 3 SDK](https://github.com/steinbergmedia/vst3sdk)
-(3.8.0, MIT-licensed) to [RenkuOS](https://github.com/RenkuOS) (a Haiku fork), with Haiku added as a
-first-class platform (`SMTG_OS_HAIKU`) rather than a Linux masquerade.
+(3.8.0, MIT-licensed) to [RenkuOS](https://github.com/RenkuOS), added as a first-class platform (`SMTG_OS_HAIKU`)
+rather than a Linux masquerade.
 
-This is part of a native RenkuOS pro-audio stack: a multitrack DAW (JackDAW) that runs on
+This is part of a native RenkuOS pro-audio stack: a multitrack DAW ([Kasen](https://github.com/rations/kasen)) that runs on
 the native Media Kit or on a full [JACK2 port](https://github.com/rations/jack-port-renku),
 a graphical patchbay, and — with this repository — VST3 plugin hosting and plugins.
 
 VST3 plug-ins never talk to an audio system themselves: the host hands them buffers. A
-plug-in built against this SDK therefore runs in JackDAW (either backend) and in the
+plug-in built against this SDK therefore runs in Kasen (either backend) and in the
 standalone `vst3host` here, with no JACK needed anywhere.
 
 ## What's here
@@ -26,8 +26,8 @@ standalone `vst3host` here, with no JACK needed anywhere.
     application-path lookup and plugin search via `find_paths()` add-on directories
   - CMake: `SMTG_HAIKU` platform detection and `Contents/x86_64-haiku/` bundle layout
   - `public.sdk/samples/vst-hosting/audiohost/source/media/jdbackend/`: a media server for
-    the SDK's audiohost sample, beside its JACK one, on JackDAW's audio backends (the
-    Media Kit, or JACK through an add-on). On Haiku the audiohost sample runs on it.
+    the SDK's audiohost sample, beside its JACK one, on Kasen's audio backends (the
+    Media Kit, or JACK through an add-on). On RenkuOS the audiohost sample runs on it.
 - `hosts/vst3host/` — a headless VST3 host with an interactive parameter REPL (list
   parameters, set values live) and the plug-in's native editor window, built twice:
   - `vst3host` on the native Media Kit, or on JACK with `--backend jack` (the `jack.so`
@@ -40,8 +40,8 @@ standalone `vst3host` here, with no JACK needed anywhere.
     change while it runs.
   - `vst3jackhost` on the SDK's own JACK client, built only when JACK is installed.
 - `haiku/jdbackend/` — the audio backends behind `vst3host`, the audiohost sample and
-  NAMku's standalone app: JackDAW's Media Kit backend, JACK backend and the loader that finds
-  the JACK add-on, copied unchanged from [JackDAW](https://github.com/rations/jackdaw-renku)
+  the NAMku and DRUMku apps: Kasen's Media Kit backend, JACK backend and the loader that finds
+  the JACK add-on, copied unchanged from [Kasen](https://github.com/rations/kasen)
   by `tools/sync-jdbackend.sh` (see `haiku/jdbackend/PROVENANCE`). Fix them there, then sync.
   `haiku/jdbackend.cmake` builds them (`jdbackend`, and `jack.so` when JACK is installed)
   for this project and for plug-in projects that build against this SDK.
@@ -60,13 +60,13 @@ dot-folders — RenkuOS organises per-user files under the `~/config` hierarchy.
 
 Work in progress. Milestones: SDK core libraries + `validator` running natively → SDK
 sample plugins (adelay, mda suite) passing validation → live JACK audio through
-vst3jackhost → NAMku → FX chains in JackDAW with a native parameter window.
-Plugin GUIs (IPlugView) are out of scope for now: no plugin ships a RenkuOS-compatible view,
-so hosting is parameter-based ("just the sliders").
+vst3jackhost → NAMku → FX chains in Kasen → plug-in editors. A plug-in that ships a native
+editor (an IPlugView on a BView, as NAMku and DRUMku do) shows it in `vst3host` and in Kasen;
+the others get a generic parameter window.
 
 ## Building (on RenkuOS)
 
-Requires RenkuOS or Haiku x86_64, gcc 13, cmake ≥ 3.25, ninja. JACK is optional (only
+Requires RenkuOS x86_64, gcc 13, cmake ≥ 3.25, ninja. JACK is optional (only
 for `vst3jackhost`).
 
 ```sh
@@ -79,11 +79,10 @@ or use the convenience `Makefile` wrapper: `make configure build`.
 ## Packaging (RenkuOS)
 
 Build the packages with `packaging/make-hpkg.sh`:
-`vst3_renku-0.4.0-1-x86_64.hpkg` (`vst3host` plus the SDK example plug-ins; needs no
+`vst3_renku-0.4.0-3-x86_64.hpkg` (`vst3host` plus the SDK example plug-ins; needs no
 JACK; replaces the old `vst3_haiku` package) and, when JACK is installed,
-`vst3_renku_jack-0.4.0-1-x86_64.hpkg` (`vst3jackhost`). Or install from source with
-`build-from-source.sh`. The HaikuPorts recipe in `packaging/vst3_haiku-0.1.0.recipe` is
-older and not yet validated. See the [stack overview](https://github.com/rations/jackDAW-renku/blob/master/STACK.md).
+`vst3_renku_jack-0.4.0-3-x86_64.hpkg` (`vst3jackhost`). Or install from source with
+`build-from-source.sh`. See the [stack overview](https://github.com/rations/renku-audio).
 
 ## License
 

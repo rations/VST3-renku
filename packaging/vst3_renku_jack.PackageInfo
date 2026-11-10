@@ -1,5 +1,5 @@
 name			vst3_renku_jack
-version			0.4.0-2
+version			0.4.0-3
 architecture	x86_64
 summary			"VST3 host on JACK (RenkuOS)"
 description		"vst3jackhost: the same headless VST3 host as vst3host in vst3_renku,
