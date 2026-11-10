@@ -1,7 +1,7 @@
 #!/bin/sh
-# build-from-source.sh — build the VST3-haiku SDK, the JACK VST3 host, and the
-# example plug-ins, and install the host + example plug-ins. Build jack-port-haiku
-# FIRST (vst3jackhost links -ljack).
+# build-from-source.sh — build the VST3-renku SDK, the VST3 hosts, and the example
+# plug-ins, and install the hosts + example plug-ins. vst3host runs on the Media
+# Kit; vst3jackhost is built too if jack (libjack) is installed.
 set -e
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -15,9 +15,11 @@ ninja -C build
 
 # Install the host and the example plug-in bundles into the non-packaged tree.
 mkdir -p /boot/system/non-packaged/bin /boot/system/non-packaged/add-ons/media/VST3
-HOST=$(find build -type f -name vst3jackhost | head -1)
-[ -n "$HOST" ] && cp "$HOST" /boot/system/non-packaged/bin/vst3jackhost
+HOST=$(find build -type f -name vst3host | head -1)
+[ -n "$HOST" ] && cp "$HOST" /boot/system/non-packaged/bin/vst3host
+JACKHOST=$(find build -type f -name vst3jackhost | head -1)
+[ -n "$JACKHOST" ] && cp "$JACKHOST" /boot/system/non-packaged/bin/vst3jackhost
 find build -type d -name '*.vst3' -exec cp -r {} /boot/system/non-packaged/add-ons/media/VST3/ \;
 
-echo ">> Installed vst3jackhost and example plug-ins under /boot/system/non-packaged."
+echo ">> Installed vst3host${JACKHOST:+, vst3jackhost} and example plug-ins under /boot/system/non-packaged."
 echo ">> The SDK static libs remain in build/lib/Release for building JackDAW/plug-ins."

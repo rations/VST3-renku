@@ -1,8 +1,27 @@
 
 if(SMTG_ENABLE_VST3_HOSTING_EXAMPLES)
  
+    # The media server: on Haiku JackDAW's audio backends (the jdbackend
+    # library, defined by the project that includes this SDK; the Media Kit by
+    # default), JACK elsewhere.
     include(SMTG_FindJack)
-    if(${LIBJACK_FOUND})
+    if(SMTG_HAIKU AND TARGET jdbackend)
+        set(audiohost_media_sources
+            source/media/jdbackend/jdbackendclient.cpp
+            source/media/jdbackend/jdbackendclient.h
+        )
+        set(audiohost_media_LIBS jdbackend)
+        set(audiohost_media_INCLUDES)
+        set(audiohost_media_FOUND TRUE)
+    elseif(${LIBJACK_FOUND})
+        set(audiohost_media_sources
+            source/media/jack/jackclient.cpp
+        )
+        set(audiohost_media_LIBS ${LIBJACK_LIBRARY})
+        set(audiohost_media_INCLUDES ${LIBJACK_INCLUDE_DIR})
+        set(audiohost_media_FOUND TRUE)
+    endif()
+    if(audiohost_media_FOUND)
         set(audiohost_sources
             "${SDK_ROOT}/public.sdk/samples/vst-hosting/editorhost/source/platform/iapplication.h"
             "${SDK_ROOT}/public.sdk/source/vst/hosting/plugprovider.cpp"
@@ -13,7 +32,7 @@ if(SMTG_ENABLE_VST3_HOSTING_EXAMPLES)
             source/media/audioclient.h
             source/media/imediaserver.h
             source/media/iparameterclient.h
-            source/media/jack/jackclient.cpp
+            ${audiohost_media_sources}
             source/media/miditovst.h
             source/platform/appinit.h
             source/usediids.cpp
@@ -77,11 +96,11 @@ if(SMTG_ENABLE_VST3_HOSTING_EXAMPLES)
             PRIVATE
                 sdk_hosting
                 ${audiohost_PLATFORM_LIBS}
-                ${LIBJACK_LIBRARY}
+                ${audiohost_media_LIBS}
         )
         target_include_directories(${target}
             PRIVATE
-                ${LIBJACK_INCLUDE_DIR}
+                ${audiohost_media_INCLUDES}
         )
         if (APP_PROPERTIES)
             set_target_properties(${target}
@@ -91,6 +110,6 @@ if(SMTG_ENABLE_VST3_HOSTING_EXAMPLES)
         endif(APP_PROPERTIES)
     else()
         message(STATUS "[SMTG] LIBJACK_FOUND is not set.")  
-    endif(${LIBJACK_FOUND})
+    endif(audiohost_media_FOUND)
 
 endif(SMTG_ENABLE_VST3_HOSTING_EXAMPLES)

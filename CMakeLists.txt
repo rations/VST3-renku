@@ -2,7 +2,7 @@
 #
 # Builds the vendored, Haiku-patched Steinberg VST 3 SDK in a headless
 # configuration (no VSTGUI, no X11): core libraries, the validator, the
-# moduleinfotool, the JACK-based audiohost sample, and the SDK example
+# moduleinfotool, the audiohost sample (on the Media Kit), and the SDK example
 # plug-ins (adelay, mda-vst3, ... — the VSTGUI-based examples exclude
 # themselves). Our own hosts/ and plugins/ subdirectories are added on top.
 
@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.25.0)
 
 project(VST3-haiku
     VERSION 0.1.0
-    DESCRIPTION "Native VST3 for Haiku: SDK port, JACK host, plugins"
+    DESCRIPTION "Native VST3 for Haiku/RenkuOS: SDK port, Media Kit and JACK hosts, plugins"
 )
 
 # Headless SDK configuration. VSTGUI (and with it every X11/cairo/pango
@@ -30,6 +30,11 @@ set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "run manually instead" FORCE)
 # per-target symlinks into the user's add-ons directory.
 set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "install via Makefile instead" FORCE)
 
+# The audio backends: JackDAW's Media Kit node and JACK add-on, kept unchanged
+# in haiku/jdbackend (tools/sync-jdbackend.sh). The SDK audiohost sample and
+# vst3host run on them. Defined before the SDK, whose audiohost looks for them.
+include(haiku/jdbackend.cmake)
+
 add_subdirectory(vst3sdk)
 
 # The SDK's plugin helper functions read these directory-scoped variables
@@ -41,7 +46,7 @@ set(public_sdk_SOURCE_DIR "${SDK_ROOT}/public.sdk")
 set(pluginterfaces_SOURCE_DIR "${SDK_ROOT}/pluginterfaces")
 
 # Our own targets
-add_subdirectory(hosts/vst3jackhost)
+add_subdirectory(hosts/vst3host)
 
 # NAMku (the Neural Amp Modeler plug-in) lives in its own repository; build
 # it against this SDK when it is checked out alongside this one.
