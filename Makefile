@@ -2,8 +2,8 @@
 # The real build system is CMake + ninja (the SDK is CMake-based).
 #
 # Typical loop from the dev host:
-#   rsync -a --delete --exclude build ./ haikulaptop:VST3-haiku/
-#   ssh haikulaptop 'cd VST3-haiku && make'
+#   rsync -a --delete --exclude build ./ haikulaptop:VST3-renku/
+#   ssh haikulaptop 'cd VST3-renku && make'
 
 BUILD_DIR ?= build
 BUILD_TYPE ?= Release
